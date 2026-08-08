@@ -514,6 +514,42 @@ def test_chunk_size_auto_matches_fullbatch(tiny_data):
     )
 
 
+def test_chunk_size_default_is_auto():
+    """The CPU default was flipped to 'auto' (cache-sized chunking)."""
+    from amica import AmicaConfig
+
+    assert AmicaConfig().chunk_size == "auto"
+
+
+def test_auto_actually_chunks_and_matches_fullbatch():
+    """On data large enough to trigger cache-sized chunking, 'auto' must reproduce the
+    full-batch fixed point to ~float64 reassociation noise (algebraic identity, not
+    byte-identical). Guards the default flip in config.chunk_size."""
+    from amica import Amica, AmicaConfig
+    from amica.solver import _choose_chunk_size
+
+    n_ch, T = 16, 12000
+    rng = np.random.RandomState(0)
+    x = rng.randn(n_ch, n_ch) @ rng.laplace(size=(n_ch, T))
+
+    # Sanity: auto genuinely chunks here (chunk < T), otherwise the test is vacuous.
+    assert _choose_chunk_size(T, n_ch, 3, dtype=np.dtype(np.float64)) < T
+
+    kw = {"max_iter": 8, "dtype": "float64", "num_mix_comps": 3}
+    res_full = Amica(AmicaConfig(**kw, chunk_size=None), random_state=42).fit(x)
+    res_auto = Amica(AmicaConfig(**kw, chunk_size="auto"), random_state=42).fit(x)
+
+    ll_full = np.asarray(res_full.log_likelihood)
+    ll_auto = np.asarray(res_auto.log_likelihood)
+    max_rel = np.max(np.abs(ll_full - ll_auto)) / max(np.max(np.abs(ll_full)), 1.0)
+    assert max_rel < 1e-6, f"LL trajectory diverged: rel {max_rel:.2e}"
+    np.testing.assert_allclose(
+        np.asarray(res_auto.unmixing_matrix_white_),
+        np.asarray(res_full.unmixing_matrix_white_),
+        atol=1e-8,
+    )
+
+
 def test_chunk_size_auto_takes_chunked_path_when_forced():
     """chunk_size='auto' uses chunked E-step when psutil reports tiny RAM."""
     psutil = pytest.importorskip("psutil")

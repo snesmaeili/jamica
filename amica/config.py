@@ -171,11 +171,17 @@ class AmicaConfig:
     update_rho: bool = True
 
     # Time-axis chunking for the E-step accumulator.
-    #   None     — full-batch (default; preserves existing behaviour)
-    #   "auto"   — use psutil (~25% of available *system* RAM). Does NOT account for
-    #              GPU VRAM — use an explicit int when running on GPU to avoid OOM.
+    #   "auto"   — (default) pick a chunk size automatically. On CPU this targets a
+    #              cache-resident hot buffer (~2x faster than full-batch and far lower peak
+    #              RAM; see benchmarks/profile_cpu.py). On GPU it sizes against the VRAM
+    #              budget and returns full-batch whenever the data fits, so GPU behaviour is
+    #              unchanged except for added OOM safety.
+    #   None     — force full-batch (one E-step pass over all samples). Use this to
+    #              reproduce the exact pre-0.x full-batch reduction order / trace.
     #   int >= 1 — explicit chunk size in samples
-    chunk_size: int | Literal["auto"] | None = None
+    # Note: "auto"/int reassociate the time-axis reductions vs full-batch — an algebraic
+    # identity (same fixed point, ~1e-14 LL agreement), not a byte-identical trace.
+    chunk_size: int | Literal["auto"] | None = "auto"
 
     # Full-batch E-step implementation (advanced; most users should leave "auto"):
     #   "auto"    — use the fused single-pass step (one responsibility pass per

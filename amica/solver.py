@@ -1234,17 +1234,33 @@ def _choose_chunk_size(
             f"Per-sample cost: {bytes_per_sample / 1024:.1f} KB."
         )
 
-    chunk = min(n_samples, max_chunk)
+    ram_chunk = min(n_samples, max_chunk)
     min_chunk = min(max(8192, n_components * 32), n_samples)
-    if chunk < min_chunk:
+    if ram_chunk < min_chunk:
         logger.warning(
             "Auto chunk_size %d (from %s budget) is below recommended minimum %d. "
             "Free memory or reduce n_components to avoid very small chunks.",
-            chunk,
+            ram_chunk,
             budget_source,
             min_chunk,
         )
-    return chunk
+
+    # On CPU, RAM headroom is an UPPER bound, not the throughput optimum. The E-step is
+    # memory-bandwidth-bound: a chunk whose (n_comp, n_mix, B) hot buffer stays resident in
+    # last-level cache runs ~2x faster than the largest-that-fits-RAM chunk (and uses far
+    # less memory). Measured on 8-core x86, jax CPU: ~1.98x end-to-end at B~2048, LL
+    # identical to 1e-14 — see benchmarks/profile_cpu.py / validate_chunk.py. GPU is left
+    # filling its VRAM budget (large chunks feed occupancy; the GPU path is out of scope).
+    if not on_gpu:
+        # Target ~2 MiB for the (n_comp, n_mix, B) hot buffer — the throughput knee measured
+        # on this class of machine sits at an L2-resident working set (~1.5-2 MiB); 4 MiB was
+        # measurably slower. It is a heuristic, not a hardware probe — re-tune with
+        # benchmarks/profile_cpu.py if the LLC differs materially.
+        target_bytes = 2 * 1024**2
+        cache_chunk = int(target_bytes // max(1, n_components * n_mix_comps * dtype_size))
+        cache_chunk = max(2048, cache_chunk)  # floor: below this per-chunk dispatch dominates
+        return min(ram_chunk, cache_chunk)
+    return ram_chunk
 
 
 class Amica:

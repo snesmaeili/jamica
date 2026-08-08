@@ -15,7 +15,7 @@ def test_default_config_valid():
     assert config.num_models == 1
     assert config.num_mix_comps == 3
     assert config.lrate == 0.01
-    assert config.chunk_size is None
+    assert config.chunk_size == "auto"
     assert config.outdir is None
 
 
