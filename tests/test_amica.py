@@ -526,14 +526,18 @@ def test_auto_actually_chunks_and_matches_fullbatch():
     full-batch fixed point to ~float64 reassociation noise (algebraic identity, not
     byte-identical). Guards the default flip in config.chunk_size."""
     from amica import Amica, AmicaConfig
+    from amica.backend import HAS_JAX
     from amica.solver import _choose_chunk_size
 
     n_ch, T = 16, 12000
     rng = np.random.RandomState(0)
     x = rng.randn(n_ch, n_ch) @ rng.laplace(size=(n_ch, T))
 
-    # Sanity: auto genuinely chunks here (chunk < T), otherwise the test is vacuous.
-    assert _choose_chunk_size(T, n_ch, 3, dtype=np.dtype(np.float64)) < T
+    # Cache-sized chunking is JAX-CPU only; on the NumPy fallback "auto" stays full-batch
+    # here (RAM easily fits), so auto == full-batch trivially. Only assert genuine chunking
+    # (chunk < T) on the JAX path, where this test is non-vacuous.
+    if HAS_JAX:
+        assert _choose_chunk_size(T, n_ch, 3, dtype=np.dtype(np.float64)) < T
 
     kw = {"max_iter": 8, "dtype": "float64", "num_mix_comps": 3}
     res_full = Amica(AmicaConfig(**kw, chunk_size=None), random_state=42).fit(x)

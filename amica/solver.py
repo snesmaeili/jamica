@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-from .backend import jax, jnp
+from .backend import HAS_JAX, jax, jnp
 from .config import AmicaConfig
 from .likelihood import (
     compute_log_det_W,
@@ -1258,11 +1258,16 @@ def _choose_chunk_size(
     # less memory). Measured on 8-core x86, jax CPU: ~1.98x end-to-end at B~2048, LL
     # identical to 1e-14 — see benchmarks/profile_cpu.py / validate_chunk.py. GPU is left
     # filling its VRAM budget (large chunks feed occupancy; the GPU path is out of scope).
-    if not on_gpu:
-        # Target ~2 MiB for the (n_comp, n_mix, B) hot buffer — the throughput knee measured
-        # on this class of machine sits at an L2-resident working set (~1.5-2 MiB); 4 MiB was
-        # measurably slower. It is a heuristic, not a hardware probe — re-tune with
-        # benchmarks/profile_cpu.py if the LLC differs materially.
+    if not on_gpu and HAS_JAX:
+        # Cache-resident chunking is a JAX-CPU optimization: the win comes from keeping the
+        # jitted/fused (n_comp, n_mix, B) working set in last-level cache. Target ~2 MiB —
+        # the throughput knee measured on this class of machine sits at an L2-resident set
+        # (~1.5-2 MiB); 4 MiB was measurably slower. Heuristic, not a hardware probe —
+        # re-tune with benchmarks/profile_cpu.py if the LLC differs materially.
+        #
+        # The pure-NumPy fallback is deliberately excluded: it has no XLA fusion, so small
+        # chunks only add Python chunk-loop overhead (~5% slower, measured). There it keeps
+        # RAM-based sizing below — i.e. full-batch until memory forces chunking.
         target_bytes = 2 * 1024**2
         cache_chunk = int(target_bytes // max(1, n_components * n_mix_comps * dtype_size))
         cache_chunk = max(2048, cache_chunk)  # floor: below this per-chunk dispatch dominates
