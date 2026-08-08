@@ -184,6 +184,7 @@ def compute_chunk_stats(
     rho: jnp.ndarray,
     log_det_sphere: float,
     sample_weight: jnp.ndarray | None = None,
+    log_det_W: jnp.ndarray | None = None,
 ) -> ChunkStats:
     """Compute all sufficient statistics for one time-chunk.
 
@@ -203,6 +204,13 @@ def compute_chunk_stats(
         Mixture shape parameters.
     log_det_sphere : float
         Log determinant of the sphering matrix, added to per-sample LL.
+    sample_weight : jnp.ndarray, optional
+        Per-sample 0/1 weights for likelihood-based rejection. None on the validated
+        no-rejection path (that branch is removed at trace time).
+    log_det_W : jnp.ndarray, optional
+        Precomputed ``log|det W|``. When None it is computed here via QR. Callers that
+        loop over many chunks with a fixed W should compute it once and pass it in to
+        avoid a redundant per-chunk QR.
 
     Returns
     -------
@@ -246,7 +254,12 @@ def compute_chunk_stats(
 
     # Per-sample log-likelihood sum (sum source LL across components)
     source_ll = jnp.sum(source_ll_per_comp, axis=0)  # (n_chunk,)
-    log_det_W = compute_log_det_W(W)
+    # log|det W| depends only on W, not on the chunk. When the caller loops over many
+    # chunks per iteration it computes this QR-based determinant ONCE and passes it in,
+    # instead of recomputing it per chunk (the small-chunk default makes that O(T/B) QRs
+    # per iteration). None preserves the original standalone behaviour (byte-identical).
+    if log_det_W is None:
+        log_det_W = compute_log_det_W(W)
     ll_per_sample = source_ll + log_det_W + log_det_sphere
     if sample_weight is None:
         ll_sum = jnp.sum(ll_per_sample)

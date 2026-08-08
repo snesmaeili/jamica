@@ -452,6 +452,7 @@ def _amica_step_chunked(
         Whether the Newton correction was actively applied.
     """
     from .accumulators import add_stats, compute_chunk_stats, zero_stats
+    from .likelihood import compute_log_det_W
     from .updates import (
         apply_alpha_update_from_stats,
         apply_beta_update_from_stats,
@@ -466,6 +467,10 @@ def _amica_step_chunked(
     n_mix = alpha.shape[0]
     dtype = W.dtype
 
+    # log|det W| is invariant across chunks within this iteration — compute the QR once
+    # and pass it into every chunk instead of recomputing it per chunk.
+    log_det_W = compute_log_det_W(W)
+
     # --- E-step: accumulate sufficient statistics over chunks ---
     totals = zero_stats(n_components, n_mix, dtype=dtype)
     data_sum_total = jnp.zeros((n_components,), dtype=dtype)
@@ -476,7 +481,9 @@ def _amica_step_chunked(
         # sample_weight (None on the no-rejection path) zero-weights rejected
         # samples; slice it with the data so the partial sums stay aligned.
         w_chunk = None if sample_weight is None else sample_weight[start:stop]
-        stats = compute_chunk_stats(data_chunk, W, alpha, mu, beta, rho, log_det_sphere, w_chunk)
+        stats = compute_chunk_stats(
+            data_chunk, W, alpha, mu, beta, rho, log_det_sphere, w_chunk, log_det_W
+        )
         totals = add_stats(totals, stats)
         # Track uncentered data sum separately for c update
         if sample_weight is None:
