@@ -111,7 +111,21 @@ def _chunk_stats_one_component(i, y_chunk, alpha, mu, beta, rho, sample_weight=N
         y_scaled = b * (y_i - m)  # (n_chunk,)
         abs_y = jnp.abs(y_scaled)
         sign_y = jnp.where(y_scaled >= 0.0, 1.0, -1.0)
-        fp = r * sign_y * jnp.power(abs_y, r - 1.0)
+
+        # Single-pass generalized-Gaussian core. The old code evaluated the shape
+        # power/exponential ~3x per mixture: pow(|y|, rho-1) for fp, pow(|y|, rho) for
+        # beta_denom_gt2, and exp(rho*log|y|) for the rho numerator. XLA does not CSE these
+        # (they are distinct HLO with different floors — verified via optimized-HLO op
+        # counts, benchmarks/profile_cpu.py), and the NumPy fallback runs each for real.
+        # Evaluate log|y| once, get |y|^(rho-1) with a single exp, and |y|^rho as an exact
+        # product |y|^(rho-1)*|y| — no extra transcendental. Every accumulator below reuses
+        # these, so per (component, mixture) it is 1 log + 1 exp, down from ~1 log + 1 exp +
+        # 2 pow. Reductions keep their original form → algebraic identity (ulp-level).
+        safe_abs = jnp.maximum(abs_y, 1e-300)
+        log_abs = jnp.log(safe_abs)
+        p1 = jnp.exp((r - 1.0) * log_abs)  # |y|^(rho-1)
+        fp = r * sign_y * p1
+        tmpy = p1 * abs_y  # |y|^rho, exact (no transcendental)
 
         ufp = u * fp
 
@@ -119,26 +133,25 @@ def _chunk_stats_one_component(i, y_chunk, alpha, mu, beta, rho, sample_weight=N
         #   g_i = Σ_j β_j · u_j · fp_j  (matches compute_weighted_score exactly)
         g_contrib = b * ufp  # (n_chunk,)
 
+        # Newton kappa; mu_denom_gt2 is exactly beta * kappa (same sum) — compute once.
+        kappa_n = jnp.sum(ufp * fp)
+
         # mu numer/denom
         mu_n = jnp.sum(ufp)
         safe_y = jnp.where(jnp.abs(y_scaled) < 1e-12, 1e-12, y_scaled)
         mu_d_le2 = b * jnp.sum(ufp / safe_y)
-        mu_d_gt2 = b * jnp.sum(ufp * fp)
+        mu_d_gt2 = b * kappa_n
 
         # beta numer/denom
         u_sum = jnp.sum(u)
         beta_d_le2 = jnp.sum(ufp * y_scaled)
-        beta_d_gt2 = jnp.sum(u * jnp.power(abs_y, r))
+        beta_d_gt2 = jnp.sum(u * tmpy)
 
         # rho numer (denom is u_sum)
-        safe_abs = jnp.maximum(abs_y, 1e-300)
-        log_abs = jnp.log(safe_abs)
-        tmpy = jnp.exp(r * log_abs)  # |y|^rho
         logab = r * log_abs
         rho_n = jnp.sum(u * tmpy * logab)
 
-        # Newton accumulators
-        kappa_n = jnp.sum(ufp * fp)
+        # Newton lambda accumulator
         lambda_tmp = fp * y_scaled - 1.0
         lambda_n = jnp.sum(u * lambda_tmp * lambda_tmp)
 
