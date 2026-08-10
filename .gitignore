@@ -89,3 +89,6 @@ slurm-*.out
 slurm-*.err
 *.f90
 codeql-db
+
+# Benchmark result artifacts (machine-specific; curated numbers live in benchmarks/RESULTS.md)
+benchmarks/*.json
