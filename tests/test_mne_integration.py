@@ -30,7 +30,7 @@ class MockRaw:
         self.data = data
         self.info = MockInfo(data.shape[0])
 
-    def get_data(self, picks=None):
+    def get_data(self, picks=None, reject_by_annotation=None):
         if picks is not None:
             return self.data[picks]
         return self.data

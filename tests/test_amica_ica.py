@@ -421,6 +421,29 @@ def test_raw_amplitude_rejection_masks_and_nans_excluded_samples():
     assert not mask[3 * sfreq : 4 * sfreq].all()
 
 
+def test_raw_bad_annotations_masked_and_excluded_from_fit():
+    """BAD-annotated samples are False in the mask and do not enter the fit."""
+    raw = _make_raw(n_ch=6, tseg=800, seed=23)
+    data = raw.get_data()
+    sfreq = int(raw.info["sfreq"])
+    data[:, 3 * sfreq : 4 * sfreq] *= 500.0
+    raw._data = data
+    raw.set_annotations(mne.Annotations(onset=3.0, duration=1.0, description="BAD_segment"))
+    kwargs = {"n_models": 2, "n_components": 4, "max_iter": 40, "random_state": 0}
+
+    amica = AmicaICA(**kwargs).fit(raw)
+    mask = amica.fit_sample_mask_
+    assert not mask[3 * sfreq : 4 * sfreq].any()
+    assert mask.sum() == amica._prep.n_samples == len(raw.times) - sfreq
+
+    good = mne.io.RawArray(raw.get_data(reject_by_annotation="omit"), raw.info, verbose="ERROR")
+    np.testing.assert_allclose(amica._W_all, AmicaICA(**kwargs).fit(good)._W_all)
+
+    kept = AmicaICA(**kwargs, reject_by_annotation=False).fit(raw)
+    assert kept.fit_sample_mask_.all()
+    assert kept._prep.n_samples == len(raw.times)
+
+
 def test_epochs_decim_keeps_public_epoch_shape():
     """Epochs + decim must still report (M, n_epochs, n_times)."""
     epochs = _make_epochs(seed=24)
