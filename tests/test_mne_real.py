@@ -51,6 +51,27 @@ def test_fit_ica_on_raw(mne):
     assert ica.get_sources(raw).get_data().shape[0] == 4
 
 
+def test_fit_ica_omits_bad_annotations(mne):
+    """fit_ica leaves BAD-annotated samples out of the fit, like ICA.fit."""
+    from jamica import fit_ica
+
+    raw = _make_raw(mne, n_ch=6, n_samp=3000)
+    raw.set_annotations(mne.Annotations(onset=4.0, duration=2.0, description="BAD_segment"))
+    good = mne.io.RawArray(raw.get_data(reject_by_annotation="omit"), raw.info)
+    params = {
+        "n_components": 3,
+        "max_iter": 20,
+        "num_mix": 2,
+        "random_state": 42,
+        "fit_params": {"do_newton": False},
+    }
+
+    ica = fit_ica(raw, **params)
+    assert ica.n_samples_ == len(good.times) < len(raw.times)
+    np.testing.assert_allclose(ica.unmixing_matrix_, fit_ica(good, **params).unmixing_matrix_)
+    assert fit_ica(raw, reject_by_annotation=False, **params).n_samples_ == len(raw.times)
+
+
 def test_direct_vs_shim_sources_correlated(mne):
     """Two identical fit_ica calls produce highly correlated sources."""
     from jamica import fit_ica

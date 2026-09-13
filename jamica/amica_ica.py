@@ -69,6 +69,12 @@ class AmicaICA:
         Decimation factor applied before fitting. See Notes on posteriors.
     fit_params : dict | None
         Extra keywords forwarded to :class:`~jamica.config.AmicaConfig`.
+    reject_by_annotation : bool
+        Whether to omit bad segments from the data before fitting. If ``True``
+        (default), annotated segments whose description begins with ``'bad'`` are
+        omitted. If ``False``, no rejection based on annotations is performed.
+
+        Has no effect if ``inst`` is not a :class:`mne.io.Raw` object.
     verbose : bool | None
         Verbosity.
 
@@ -86,7 +92,7 @@ class AmicaICA:
         ``p(h | x_t)`` on the ORIGINAL input sampling grid: ``(n_models,
         n_times)`` for Raw and ``(n_models, n_epochs, n_times)`` for Epochs,
         regardless of any decimation used while fitting. Points excluded from
-        the fit by epoch rejection are ``NaN``.
+        the fit by epoch or annotation rejection are ``NaN``.
     fit_sample_mask_ : np.ndarray of bool
         Which points of that same grid entered the optimisation --
         ``(n_times,)`` for Raw, ``(n_epochs, n_times)`` for Epochs. See
@@ -119,6 +125,7 @@ class AmicaICA:
         flat=None,
         decim=None,
         fit_params: dict | None = None,
+        reject_by_annotation: bool = True,
         verbose=None,
     ):
         if int(n_models) < 1:
@@ -133,6 +140,7 @@ class AmicaICA:
         self.flat = flat
         self.decim = decim
         self.fit_params = fit_params
+        self.reject_by_annotation = reject_by_annotation
         self.verbose = verbose
         self._models = None
 
@@ -165,6 +173,7 @@ class AmicaICA:
             reject=self.reject,
             flat=self.flat,
             decim=self.decim,
+            reject_by_annotation=self.reject_by_annotation,
             verbose=self.verbose,
         )
 
@@ -289,7 +298,8 @@ class AmicaICA:
 
         ``True`` where the sample contributed. Epoch rejection (``reject`` /
         ``flat``) sets ``False`` on the dropped epochs and on any trailing
-        segment shorter than one epoch.
+        segment shorter than one epoch. ``reject_by_annotation`` sets ``False``
+        on bad-annotated spans.
 
         Decimation does **not** clear the mask. ``scipy.signal.decimate`` applies
         an anti-aliasing FIR filter before downsampling, so each retained point
@@ -309,7 +319,7 @@ class AmicaICA:
     def _posteriors_on_input_grid(self, inst):
         """``p(h|x_t)`` for every point of the input timeline.
 
-        Samples excluded from the fit by epoch rejection are returned as ``NaN``
+        Samples excluded from the fit by epoch or annotation rejection are returned as ``NaN``
         rather than as a value the fit never saw.
         """
         post = self.get_model_probabilities(inst)
@@ -477,6 +487,7 @@ class AmicaICA:
                 "flat": self.flat,
                 "decim": self.decim,
                 "fit_params": self.fit_params,
+                "reject_by_annotation": self.reject_by_annotation,
             },
             "fitted": {
                 "n_models_": int(self.n_models_),

@@ -134,6 +134,7 @@ def fit_ica(
     flat=None,
     decim=None,
     fit_params: dict | None = None,
+    reject_by_annotation: bool = True,
     verbose=None,
 ):
     """Fit ICA using AMICA on MNE Raw or Epochs data.
@@ -173,6 +174,12 @@ def fit_ica(
         Additional parameters forwarded to :class:`~jamica.config.AmicaConfig`,
         e.g. ``dict(do_reject=True, rejsig=3.0)`` to enable AMICA's per-sample
         likelihood rejection (see Notes).
+    reject_by_annotation : bool
+        Whether to omit bad segments from the data before fitting. If ``True``
+        (default), annotated segments whose description begins with ``'bad'`` are
+        omitted. If ``False``, no rejection based on annotations is performed.
+
+        Has no effect if ``inst`` is not a :class:`mne.io.Raw` object.
     verbose : bool | None
         Verbosity.
 
@@ -198,7 +205,7 @@ def fit_ica(
           n_dropped = ica.amica_result_.n_rejected_
 
       ``sample_mask_`` indexes the samples passed to the fit (after any ``decim`` /
-      epoch ``reject``), not ``raw.times``.
+      epoch ``reject`` / ``reject_by_annotation``), not ``raw.times``.
 
     Examples
     --------
@@ -232,6 +239,7 @@ def fit_ica(
         reject=reject,
         flat=flat,
         decim=decim,
+        reject_by_annotation=reject_by_annotation,
         verbose=verbose,
     )
     from mne.io import BaseRaw as _BaseRaw
@@ -442,6 +450,7 @@ def _prepare_mne_input(
     reject=None,
     flat=None,
     decim=None,
+    reject_by_annotation=True,
     verbose=None,
 ):
     """Replicate MNE's pre-whiten + PCA pipeline ahead of an AMICA fit.
@@ -481,6 +490,7 @@ def _prepare_mne_input(
             reject=reject,
             flat=flat,
             baseline=None,
+            reject_by_annotation=reject_by_annotation,
             preload=True,
             verbose=verbose,
         )
@@ -507,6 +517,9 @@ def _prepare_mne_input(
             for onset in events[np.asarray(epochs.selection, dtype=int), 0]:
                 start = int(onset) - first_samp
                 fit_sample_mask[start : start + epoch_len] = True
+    elif isinstance(inst, _BaseRaw) and reject_by_annotation:
+        raw_data = inst.get_data(picks_idx, reject_by_annotation="omit")
+        fit_sample_mask = ~np.isnan(inst.get_data(picks_idx[:1], reject_by_annotation="NaN")[0])
     else:
         raw_data = _extract_data(inst, picks_idx)
         fit_sample_mask = np.ones(raw_data.shape[1], dtype=bool)

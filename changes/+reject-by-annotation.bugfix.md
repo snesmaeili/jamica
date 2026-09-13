@@ -1,0 +1,1 @@
+`fit_ica()` and `AmicaICA` fitted on Raw data used every sample unless `reject` or `flat` was set, so spans annotated as bad entered the decomposition, unlike `mne.preprocessing.ICA.fit()`. Both now take `reject_by_annotation=True` and leave those spans out of the fit and out of `fit_sample_mask_`; pass `reject_by_annotation=False` for the previous behaviour.
